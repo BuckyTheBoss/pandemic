@@ -1,0 +1,7 @@
+[
+  {"title": "Resilient Population", "description": "Remove any 1 card in the infection discard pile from the game. You may play this in between the infect and intensify steps of an epidemic"},
+  {"title": "One Quiet Night", "description": "Skip the next infect cities step"},
+  {"title": "Forecast", "description": "View and rearrange the top 6 cards of the infection deck. Put them back on top"},
+  {"title": "Airlift", "description": "Move any 1 pawn to any city."},
+  {"title": "Government Grant", "description": "Add 1 Research Station to any city" }
+]

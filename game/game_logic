@@ -1,0 +1,170 @@
+from .models import Card, DeckCard, CityNode, InfectionCard, Cube, Pawn
+from cards.models import City
+import random
+
+
+def create_city_nodes(game):
+    for city in City.objects.all():
+        node = CityNode(game=game, city=city)
+        node.save()
+
+
+def build_decks(game, difficulty=4):
+    player_num = game.players.all().count()
+    deck = []
+    for card in Card.objects.filter(is_epidemic=False):
+        deck_card = DeckCard(card=card, game=game)
+        deck_card.save()
+        deck.append(deck_card)
+
+    random.shuffle(deck)
+    if player_num % 2 == 0:
+        handable_cards = deck[0:7]
+        deck = deck[7::]
+    else:
+        handable_cards = deck[0:8]
+        deck = deck[8::]
+
+    while handable_cards:
+        for player in game.players.all():
+            player.hand.add(handable_cards.pop())
+
+    pandemic_card = Card.objects.filter(is_epidemic=True).first()
+
+    sub_decks = []
+    for num in range(difficulty):
+        pandemic_deck_card = DeckCard(game=game, card=pandemic_card)
+        pandemic_deck_card.save()
+        sub_deck = [pandemic_card]
+        sub_decks.append(sub_deck)
+
+    while deck:
+        for sub_deck in sub_decks:
+            if deck:
+                sub_deck.append(deck.pop())
+            else:
+                break
+
+    for sub_deck in sub_decks:
+        random.shuffle(sub_deck)
+        deck += sub_deck
+
+    for i, card in enumerate(deck):
+        card.index = i
+        card.save()
+
+    infection_deck = []
+    for node in CityNode.objects.all():
+        infection = InfectionCard(location=node)
+        infection.save()
+        infection_deck.append(infection)
+
+    random.shuffle(infection_deck)
+    for i, infection in enumerate(infection_deck):
+        infection.index = i
+        infection.save()
+
+def check_cube_num_of_color(game, disease):
+    cube_count = 0
+    for node in game.citynode_set.all():
+        node_cubes = node.cubes.filter(disease=disease).count()
+        cube_count += node_cubes
+    if cube_count >= 24:
+        game.status = 'L'
+        game.save()
+
+
+def outbreak_trigger(game, node, exception=None):
+    # triggers infect city for each connected city to node, also increases outbreak counter by 1
+    for city in node.city.connected_cities.all():
+        new_node = game.citynode_set.get(city=city)
+        if new_node != exception:
+            infect_city(game, new_node, exception=node, disease=node.city.disease)
+    game.outbreaks += 1
+    game.save()
+
+
+def infect_city(game, node, exception=None, disease=None):
+    # infects CityNode or call to outbreak unless that was the last city to outbreak
+    current_disease = node.city.disease
+    check_cube_num_of_color(game, current_disease)
+    location_cube_num = node.cubes.filter(disease=current_disease).count()
+    # Confirm disease isnt eradicated
+    if current_disease in game.eradicated.all():
+        return
+
+    # Confirm Medic isnt on node while disease is cured
+    if node.pawn_set.filter(name='Medic') and current_disease in game.cured.all():
+        return
+    # Confirm Quar-Spel isnt in the location or any connected ones
+    for city in node.city.connected_cities.all():
+        connected_node = game.citynode_set.get(city=city)
+        if connected_node.pawn_set.filter(name='Quarantine Specialist'):
+            return
+    if node.pawn_set.filter(name='Quarantine Specialist'):
+        return
+    # Infection Logic/Outbreak Trigger
+    if location_cube_num == 3:
+        if not exception:
+            outbreak_trigger(game, node)
+        else:
+            outbreak_trigger(game, node, exception=exception)
+    else:
+        if disease:
+            cube = Cube.objects.filter(disease=disease).difference(node.cubes.filter(disease=current_disease)).first()
+        else:
+            cube = Cube.objects.filter(disease=current_disease).difference(node.cubes.filter(disease=disease)).first()
+        node.cubes.add(cube)
+
+def epidemic_trigger(game):
+    game.infection_rate += 1
+    game.save()
+    epidemic_target = game.infection_deck.all().last()
+    epidemic_target.is_discarded=True
+    epidemic_target.save()
+    discarded_cards = list(game.infection_deck.filter(is_discarded=True))
+    not_discarded_cards = list(game.infection_deck.filter(is_discarded=False))
+    random.shuffle(discarded_cards)
+    infection_deck = discarded_cards + not_discarded_cards
+    for i, infection in enumerate(infection_deck):
+        infection.index = i
+        infection.save()
+    while epidemic_target.location.cubes.all().count() <= 3:
+        infect_city(game, epidemic_target.location)
+
+
+def draw_player_card(game, player):
+    top_card = game.player_deck.filter(in_deck=True).first()
+    if not top_card:
+        game.status = 'L'
+        game.save()
+    if top_card.card.is_epidemic:
+        epidemic_trigger(game)
+    else:
+        player.hand.add(top_card)
+    top_card.in_deck = False
+    top_card.save()
+
+def draw_infection_card(game):
+    top_card = game.infection_deck.filter(is_discarded=False).first()
+    top_card.is_discarded = True
+    top_card.save()
+    infect_city(game, top_card.location)
+
+
+# def assign_pawns(game):
+#     for player in game.players.all():
+#         pawn = random.choice(Pawn.objects.all())
+#
+#
+# def move_pawn(pawn, node, other_pawn=None):
+#     if pawn.character.name == 'Dispatcher':
+#
+
+
+def cure_node(player,node):
+    pass
+
+
+def use_card(game, card):
+    pass
